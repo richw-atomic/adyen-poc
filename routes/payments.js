@@ -224,15 +224,16 @@ router.post('/details/:paymentId', async (req, res) => {
         // Update our payment record
         await paymentsDb.updateAsync(
             { _id: internalPaymentId },
-            { $set: {
-                getUpdateWithTimestamps({ $set: {
+            getUpdateWithTimestamps({
+                $set: {
                     status: adyenDetailsResponse.resultCode || 'pendingWebhook',
                     resultCode: adyenDetailsResponse.resultCode,
                     refusalReason: adyenDetailsResponse.refusalReason,
                     adyenPaymentPspReference: adyenDetailsResponse.pspReference || paymentAttempt.adyenPaymentPspReference, // Update if it was missing
                     action: null, // Clear previous action
-                }})
-            );
+                }
+            })
+        );
 
         // Update order with new remaining amount and orderData from /payments/details response if available
         // The final confirmation usually comes from AUTHORISATION webhook.
