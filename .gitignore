@@ -70,6 +70,10 @@ web_modules/
 .env.*
 !.env.example
 
+# Optional NeDB data files (if storing to disk)
+data/
+*.db
+
 # parcel-bundler cache (https://parceljs.org/)
 .cache
 .parcel-cache
