@@ -1,7 +1,7 @@
 const express = require('express');
 const crypto = require('crypto');
 const { ADYEN_HMAC_KEY } = require('../config/adyenConfig');
-const { ordersDb, paymentsDb, tokensDb } = require('../utils/db'); // Assuming db instances are here
+const { ordersDb, paymentsDb, tokensDb, getUpdateWithTimestamps } = require('../utils/db'); // Added getUpdateWithTimestamps
 
 const router = express.Router();
 
@@ -132,7 +132,7 @@ router.post('/', async (req, res) => {
                     console.log(`ORDER_OPENED: PSP ${pspReference}, MerchantRef ${merchantReference}`);
                     const orderOpened = await ordersDb.findOneAsync({ adyenOrderPspReference: pspReference });
                     if (orderOpened) {
-                        await ordersDb.updateAsync({ _id: orderOpened._id }, { $set: { status: 'open', updatedAt: new Date().toISOString() } });
+                        await ordersDb.updateAsync({ _id: orderOpened._id }, getUpdateWithTimestamps({ $set: { status: 'open' } }));
                         console.log(`Order ${orderOpened._id} status confirmed as open.`);
                     } else {
                         console.warn(`ORDER_OPENED for unknown Adyen PSP Reference: ${pspReference}`);
@@ -146,11 +146,14 @@ router.post('/', async (req, res) => {
                         const newStatus = success === 'true' || success === true ? 'paid' : 'cancelled'; // Adyen success can be string "true" or boolean
                         await ordersDb.updateAsync(
                             { _id: orderToClose._id },
-                            { $set: { status: newStatus, updatedAt: new Date().toISOString() } }
+                            getUpdateWithTimestamps({ $set: { status: newStatus } })
                         );
                         console.log(`Order ${orderToClose._id} status updated to ${newStatus}.`);
                         if (newStatus === 'paid') {
-                             await ordersDb.updateAsync({ _id: orderToClose._id }, { $set: { remainingAmount: { value: 0, currency: orderToClose.currency } }});
+                             await ordersDb.updateAsync( // This is a subsequent update, getUpdateWithTimestamps will apply again
+                                 { _id: orderToClose._id },
+                                 getUpdateWithTimestamps({ $set: { remainingAmount: { value: 0, currency: orderToClose.currency } }})
+                             );
                              console.log(`Order ${orderToClose._id} remaining amount set to 0.`);
                         }
                     } else {
@@ -167,12 +170,11 @@ router.post('/', async (req, res) => {
                         const paymentStatus = success === 'true' || success === true ? 'authorised' : 'refused';
                         await paymentsDb.updateAsync(
                             { _id: paymentToUpdate._id },
-                            { $set: {
+                            getUpdateWithTimestamps({ $set: {
                                 status: paymentStatus,
                                 adyenPaymentPspReference: pspReference, // Ensure PSP ref is stored if it wasn't (e.g. from /details)
-                                refusalReason: success === 'true' || success === true ? null : reason,
-                                updatedAt: new Date().toISOString()
-                            }}
+                                refusalReason: success === 'true' || success === true ? null : reason
+                            }})
                         );
                         console.log(`Payment ${paymentToUpdate._id} status updated to ${paymentStatus}.`);
 
@@ -180,10 +182,10 @@ router.post('/', async (req, res) => {
                         if (paymentStatus === 'authorised') {
                             await ordersDb.updateAsync(
                                 { _id: paymentToUpdate.orderId },
-                                {
+                                getUpdateWithTimestamps({
                                     $addToSet: { partialPaymentPspReferences: pspReference }, // Add if not already present
-                                    $set: { status: 'processing', updatedAt: new Date().toISOString() } // Ensure order is 'processing'
-                                }
+                                    $set: { status: 'processing' } // Ensure order is 'processing'
+                                })
                             );
                             console.log(`Order ${paymentToUpdate.orderId} updated with authorised payment ${pspReference}.`);
                         }
@@ -200,7 +202,7 @@ router.post('/', async (req, res) => {
                      if (paymentToCancel) {
                         await paymentsDb.updateAsync(
                             { _id: paymentToCancel._id },
-                            { $set: { status: 'cancelled', refusalReason: reason, updatedAt: new Date().toISOString() }}
+                            getUpdateWithTimestamps({ $set: { status: 'cancelled', refusalReason: reason }})
                         );
                         console.log(`Payment ${paymentToCancel._id} status updated to cancelled.`);
                         // Potentially adjust order's remaining amount if this cancellation affects it.

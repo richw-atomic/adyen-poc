@@ -1,7 +1,7 @@
 const express = require('express');
 const { v4: uuidv4 } = require('uuid');
 const { checkout, ADYEN_MERCHANT_ACCOUNT } = require('../config/adyenConfig');
-const { ordersDb, paymentsDb, tokensDb } = require('../utils/db');
+const { ordersDb, paymentsDb, tokensDb, addTimestampsToDoc, getUpdateWithTimestamps } = require('../utils/db');
 
 const router = express.Router();
 
@@ -102,10 +102,9 @@ router.post('/', async (req, res) => {
             refusalReason: adyenPaymentResponse.refusalReason || null,
             shopperReference: storePaymentMethod ? shopperReference : null,
             clientReturnUrl: clientReturnUrl, // Store the original client return URL to use after /details
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
+            // Timestamps will be added by addTimestampsToDoc
         };
-        await paymentsDb.insertAsync(newPayment);
+        await paymentsDb.insertAsync(addTimestampsToDoc(newPayment));
 
         // Update order with new remaining amount and orderData from payment response
         // This happens regardless of whether the payment is immediately Authorised or requires an action
@@ -119,14 +118,13 @@ router.post('/', async (req, res) => {
 
             await ordersDb.updateAsync(
                 { _id: order._id },
-                {
+                getUpdateWithTimestamps({
                     $set: {
                         remainingAmount: updatedRemainingAmount,
                         status: 'processing', // Mark as processing as a payment has been attempted
-                        updatedAt: new Date().toISOString()
                     },
                     $push: { orderDataHistory: updatedOrderData }
-                }
+                })
             );
         }
 
@@ -143,10 +141,10 @@ router.post('/', async (req, res) => {
                 cardBrand: adyenPaymentResponse.additionalData['paymentMethodVariant'] || paymentMethod.type,
                 cardSummary: adyenPaymentResponse.additionalData['cardSummary'] || 'N/A', // e.g., last 4 digits
                 paymentMethodType: paymentMethod.type, // e.g. "scheme"
-                creationDate: new Date().toISOString(),
+                    // creationDate will be set by addTimestampsToDoc (as createdAt)
                 // Potentially store more from additionalData if useful (e.g., expiryDate, cardBin)
             };
-            await tokensDb.insertAsync(tokenData);
+                await tokensDb.insertAsync(addTimestampsToDoc(tokenData));
             console.log(`Token ${tokenData.adyenRecurringDetailReference} stored for shopper ${shopperReference}`);
         }
 
@@ -227,14 +225,14 @@ router.post('/details/:paymentId', async (req, res) => {
         await paymentsDb.updateAsync(
             { _id: internalPaymentId },
             { $set: {
-                status: adyenDetailsResponse.resultCode || 'pendingWebhook',
-                resultCode: adyenDetailsResponse.resultCode,
-                refusalReason: adyenDetailsResponse.refusalReason,
-                adyenPaymentPspReference: adyenDetailsResponse.pspReference || paymentAttempt.adyenPaymentPspReference, // Update if it was missing
-                action: null, // Clear previous action
-                updatedAt: new Date().toISOString()
-            }}
-        );
+                getUpdateWithTimestamps({ $set: {
+                    status: adyenDetailsResponse.resultCode || 'pendingWebhook',
+                    resultCode: adyenDetailsResponse.resultCode,
+                    refusalReason: adyenDetailsResponse.refusalReason,
+                    adyenPaymentPspReference: adyenDetailsResponse.pspReference || paymentAttempt.adyenPaymentPspReference, // Update if it was missing
+                    action: null, // Clear previous action
+                }})
+            );
 
         // Update order with new remaining amount and orderData from /payments/details response if available
         // The final confirmation usually comes from AUTHORISATION webhook.
@@ -247,14 +245,13 @@ router.post('/details/:paymentId', async (req, res) => {
 
             await ordersDb.updateAsync(
                 { _id: order._id },
-                {
+                getUpdateWithTimestamps({
                     $set: {
                         remainingAmount: updatedRemainingAmount,
                         // status will be updated by webhook
-                        updatedAt: new Date().toISOString()
                     },
                     $push: { orderDataHistory: updatedOrderData }
-                }
+                })
             );
         }
 
@@ -277,9 +274,9 @@ router.post('/details/:paymentId', async (req, res) => {
                     cardBrand: adyenDetailsResponse.additionalData['paymentMethodVariant'] || paymentAttempt.paymentMethodType,
                     cardSummary: adyenDetailsResponse.additionalData['cardSummary'] || 'N/A',
                     paymentMethodType: paymentAttempt.paymentMethodType,
-                    creationDate: new Date().toISOString(),
+                    // creationDate will be set by addTimestampsToDoc (as createdAt)
                 };
-                await tokensDb.insertAsync(tokenData);
+                await tokensDb.insertAsync(addTimestampsToDoc(tokenData));
                 console.log(`Token ${tokenData.adyenRecurringDetailReference} stored for shopper ${paymentAttempt.shopperReference} after /details call.`);
             }
         }

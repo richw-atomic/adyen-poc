@@ -1,7 +1,7 @@
 const express = require('express');
 const { v4: uuidv4 } = require('uuid');
 const { checkout, ADYEN_MERCHANT_ACCOUNT } = require('../config/adyenConfig');
-const { ordersDb, paymentsDb, tokensDb } = require('../utils/db'); // Placeholder for DB instances
+const { ordersDb, addTimestampsToDoc, getUpdateWithTimestamps } = require('../utils/db');
 
 const router = express.Router();
 
@@ -46,11 +46,10 @@ router.post('/', async (req, res) => {
             expiresAt: adyenOrderResponse.expiresAt, // If not provided in request, Adyen sets it
             orderDataHistory: [adyenOrderResponse.orderData], // Store initial orderData
             partialPaymentPspReferences: [],
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
+            // Timestamps will be added by addTimestampsToDoc
         };
 
-        await ordersDb.insertAsync(newOrder);
+        await ordersDb.insertAsync(addTimestampsToDoc(newOrder));
 
         res.status(201).json({
             orderId: newOrder._id,
@@ -115,7 +114,7 @@ router.post('/:orderId/cancel', async (req, res) => {
         // Let's mark it as 'cancelling' and let webhook confirm.
         await ordersDb.updateAsync(
             { _id: orderId },
-            { $set: { status: 'cancelling', updatedAt: new Date().toISOString() } }
+            getUpdateWithTimestamps({ $set: { status: 'cancelling' } })
         );
 
         res.status(200).json({
