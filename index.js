@@ -1,6 +1,7 @@
 const express = require('express');
 const dotenv = require('dotenv');
 const { Client, Config, CheckoutAPI } = require('@adyen/api-library');
+const path = require('path');
 
 // Load environment variables (already called in adyenConfig.js, but good practice if other .env vars are used here)
 dotenv.config();
@@ -10,18 +11,28 @@ const { checkout, ADYEN_MERCHANT_ACCOUNT, ADYEN_HMAC_KEY } = require('./config/a
 const app = express();
 const port = process.env.PORT || 3000;
 
+// Setup proxy
+app.set('trust proxy', true); // Trust the first proxy (useful if behind a reverse proxy)
+
+// Setup view engine
+app.set('view engine', 'ejs');
+app.set('views', path.join(__dirname, 'views'));
+
 // Middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// Middleware for webhooks to get raw body for HMAC validation
+app.use('/api/webhooks', express.raw({ type: 'application/json' }));
+
 // Basic request logging middleware
-app.use((req, res, next) => {
-    console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
-    if (Object.keys(req.body).length > 0) {
-        console.log('Request Body:', JSON.stringify(req.body, null, 2));
-    }
-    next();
-});
+// app.use((req, res, next) => {
+//     console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+//     if (req.body && Object.keys(req.body).length > 0) {
+//         console.log('Request Body:', JSON.stringify(req.body, null, 2));
+//     }
+//     next();
+// });
 
 // DB instances are now managed in utils/db.js
 // const Datastore = require('nedb');
@@ -45,7 +56,7 @@ const storedPaymentMethodsRoutes = require('./routes/storedPaymentMethods');
 
 // Routes
 app.get('/', (req, res) => {
-    res.send('Adyen POC Server Running!');
+    res.render('index', { clientKey: process.env.ADYEN_CLIENT_KEY || 'YOUR_ADYEN_CLIENT_KEY' });
 });
 
 app.use('/api/orders', orderRoutes);

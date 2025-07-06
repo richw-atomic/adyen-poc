@@ -28,10 +28,12 @@ router.post('/', async (req, res) => {
             merchantAccount: ADYEN_MERCHANT_ACCOUNT,
             amount: amount,
             reference: orderRef,
-            // expiresAt: "2024-12-31T23:20:30Z" // Optional: ISO 8601 format, default is 24 hours
         };
 
-        const adyenOrderResponse = await checkout.orders(orderRequest);
+        console.log(checkout.OrdersApi);
+
+        // Use the new checkout.orders.createOrder method
+        const adyenOrderResponse = await checkout.OrdersApi.orders(orderRequest);
 
         console.log(`Adyen /orders response for ${orderRef}:`, JSON.stringify(adyenOrderResponse, null, 2));
 
@@ -46,7 +48,6 @@ router.post('/', async (req, res) => {
             expiresAt: adyenOrderResponse.expiresAt, // If not provided in request, Adyen sets it
             orderDataHistory: [adyenOrderResponse.orderData], // Store initial orderData
             partialPaymentPspReferences: [],
-            // Timestamps will be added by addTimestampsToDoc
         };
 
         await ordersDb.insertAsync(addTimestampsToDoc(newOrder));
@@ -90,7 +91,7 @@ router.post('/:orderId/cancel', async (req, res) => {
             return res.status(404).json({ error: 'Order not found.' });
         }
 
-        if (order.status === 'cancelled' || order.status === 'paid') { // Assuming 'paid' means fully settled and closed
+        if (order.status === 'cancelled' || order.status === 'paid') {
             return res.status(400).json({ error: `Order status is '${order.status}', cannot cancel.` });
         }
 
@@ -103,15 +104,10 @@ router.post('/:orderId/cancel', async (req, res) => {
         };
 
         console.log(`Attempting to cancel Adyen order ${order.adyenOrderPspReference}:`, JSON.stringify(cancelPayload, null, 2));
-        const adyenCancelResponse = await checkout.cancelOrder(cancelPayload);
+        // Use the new checkout.orders.cancelOrder method
+        const adyenCancelResponse = await checkout.ordersApi.cancelOrder(cancelPayload);
         console.log(`Adyen /orders/cancel response for ${order.adyenOrderPspReference}:`, JSON.stringify(adyenCancelResponse, null, 2));
 
-        // Adyen's cancelOrder response includes pspReference (of the cancel request itself) and status (e.g., "received")
-        // The actual order status update to "cancelled" and refund/cancellation of partial payments
-        // will be confirmed via ORDER_CLOSED (success: false) and potentially other webhooks (CANCEL_OR_REFUND).
-
-        // For now, we can optimistically update our internal status or wait for webhook.
-        // Let's mark it as 'cancelling' and let webhook confirm.
         await ordersDb.updateAsync(
             { _id: orderId },
             getUpdateWithTimestamps({ $set: { status: 'cancelling' } })
@@ -120,7 +116,7 @@ router.post('/:orderId/cancel', async (req, res) => {
         res.status(200).json({
             orderId: order._id,
             adyenCancelPspReference: adyenCancelResponse.pspReference, // PSP reference of the cancellation request
-            status: 'cancelling', // Or directly use adyenCancelResponse.status
+            status: 'cancelling',
             message: `Order cancellation initiated. PSP Reference: ${adyenCancelResponse.pspReference}. Final status will be updated via webhook.`
         });
 

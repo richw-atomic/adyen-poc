@@ -1,6 +1,5 @@
 const express = require('express');
-const { tokensDb } = require('../utils/db'); // Assuming db instances are here
-const { ADYEN_MERCHANT_ACCOUNT, checkout } = require('../config/adyenConfig'); // For potential future use with Adyen's /storedPaymentMethods
+const { tokensDb } = require('../utils/db');
 
 const router = express.Router();
 

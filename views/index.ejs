@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Adyen + Alpine.js Checkout</title>
+    <!-- Adyen CSS -->
+    <link rel="stylesheet" href="https://checkoutshopper-test.adyen.com/checkoutshopper/sdk/5.62.0/adyen.css">
+    <!-- Simple CSS for styling -->
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 0; background-color: #f8f9fa; display: flex; justify-content: center; padding-top: 40px; }
+        .container { max-width: 480px; width: 100%; background: #fff; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); padding: 20px 30px; }
+        h1 { font-size: 24px; margin-bottom: 20px; text-align: center; }
+        .input-group { margin-bottom: 15px; }
+        label { display: block; font-weight: 500; margin-bottom: 5px; }
+        input[type="text"] { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+        button { width: 100%; padding: 12px; background-color: #007bff; color: white; border: none; border-radius: 4px; font-size: 16px; cursor: pointer; transition: background-color 0.2s; }
+        button:disabled { background-color: #a0a0a0; cursor: not-allowed; }
+        button:hover:not(:disabled) { background-color: #0056b3; }
+        .adyen-checkout__label__text { font-weight: 500; }
+        #card-container { border: 1px solid #e8e8e8; border-radius: 4px; padding: 10px; margin-top: 20px; }
+        pre { background-color: #2d2d2d; color: #f2f2f2; padding: 15px; border-radius: 4px; white-space: pre-wrap; word-wrap: break-word; font-family: "SF Mono", "Fira Code", "Source Code Pro", monospace; }
+        .status-message { text-align: center; padding: 10px; border-radius: 4px; margin-top: 15px; }
+        .error { background-color: #f8d7da; color: #721c24; }
+        .success { background-color: #d4edda; color: #155724; }
+    </style>
+    <!-- Alpine.js -->
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <!-- Adyen JS -->
+    <script src="https://checkoutshopper-test.adyen.com/checkoutshopper/sdk/5.62.0/adyen.js"></script>
+</head>
+<body>
+    <div class="container" x-data="adyenCheckout()" x-init="init()">
+        <h1>Adyen PoC Checkout</h1>
+
+        <!-- Loading State -->
+        <div x-show="status === 'loading'">
+            <p style="text-align: center;">Loading Checkout...</p>
+        </div>
+
+        <p>Current Status: <span x-text="status"></span></p>
+
+        <div id="card-container">
+            <!-- Adyen card component will be mounted here -->
+        </div>
+
+        <!-- Container for 3DS2 challenge -->
+        <div id="action-container" style="margin-top: 20px;" x-show="status === 'pendingAction'"></div>
+
+        <!-- Adyen Card Component -->
+        <div x-show="status === 'ready'">
+            <button @click="makePayment" :disabled="status === 'loading' || status === 'success'" style="margin-top: 20px;">
+                <span x-show="status !== 'loading'">Pay $100.00</span>
+                <span x-show="status === 'loading'">Processing Payment...</span>
+            </button>
+        </div>
+        
+        <!-- Status and Response Display -->
+        <div x-show="errorMessage" class="status-message error" x-text="errorMessage"></div>
+        <div x-show="paymentResponse.resultCode === 'Authorised'" class="status-message success">
+            Payment Authorised! PSP Reference: <span x-text="paymentResponse.pspReference"></span>
+        </div>
+
+        <div x-show="['IdentifyShopper', 'ChallengeShopper'].includes(paymentResponse.resultCode)" class="status-message">
+            <p>3D Secure authentication required. Please complete the challenge.</p>
+            <p>Result Code: <span x-text="paymentResponse.resultCode"></span></p>
+        </div>
+
+        <div x-show="['Refused', 'Error', 'Cancelled'].includes(paymentResponse.resultCode)" class="status-message error">
+            Payment <span x-text="paymentResponse.resultCode"></span>. Reason: <span x-text="paymentResponse.refusalReason || 'N/A'"></span>
+        </div>
+
+        <template x-if="paymentResponse.resultCode">
+            <pre x-text="JSON.stringify(paymentResponse, null, 2)"></pre>
+        </template>
+    </div>
+
+    <script>
+        function adyenCheckout() {
+            return {
+                clientKey: '<%- clientKey %>', // Injected by EJS
+                order: {},
+                paymentResponse: {},
+                adyenCardComponent: null,
+                status: 'initial', // initial, loading, ready, error, success
+                errorMessage: '',
+
+                init() {
+                    if (!this.clientKey || this.clientKey.includes('YOUR_ADYEN_CLIENT_KEY')) {
+                        this.errorMessage = 'Adyen Client Key not configured on the server. Please set ADYEN_CLIENT_KEY in your .env file.';
+                        this.status = 'error';
+                        return;
+                    }
+
+                    const urlParams = new URLSearchParams(window.location.search);
+                    const paymentId = urlParams.get('paymentId');
+                    const resultCode = urlParams.get('resultCode');
+                    const errorMessage = urlParams.get('errorMessage');
+
+                    if (paymentId && resultCode) {
+                        this.paymentResponse = {
+                            paymentId: paymentId,
+                            resultCode: resultCode,
+                            pspReference: urlParams.get('pspReference'),
+                            refusalReason: urlParams.get('refusalReason'),
+                        };
+                        if (errorMessage) {
+                            this.errorMessage = `Payment Error: ${errorMessage}`;
+                            this.status = 'error';
+                        } else if (resultCode === 'Authorised') {
+                            this.status = 'success';
+                        } else if (['IdentifyShopper', 'ChallengeShopper'].includes(resultCode)) {
+                            this.status = 'pendingAction';
+                        } else {
+                            this.status = 'error';
+                        }
+                        window.history.replaceState({}, document.title, window.location.pathname);
+                        this.initializeAdyen();
+                    } else {
+                        this.createOrderAndInitAdyen();
+                    }
+                },
+
+                async createOrderAndInitAdyen() {
+                    this.status = 'loading';
+                    this.errorMessage = '';
+                    try {
+                        console.log('createOrderAndInitAdyen: Attempting to fetch /api/orders...');
+                        const response = await fetch('/api/orders', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ amount: { value: 10000, currency: "USD" } })
+                        });
+
+                        console.log('createOrderAndInitAdyen: Received response from /api/orders.');
+                        if (!response.ok) {
+                            const err = await response.json();
+                            console.error('createOrderAndInitAdyen: Server responded with error:', err);
+                            throw new Error(err.message || 'Failed to create order.');
+                        }
+
+                        Object.assign(this.order, await response.json());
+                        console.log('createOrderAndInitAdyen: Order created:', this.order);
+                        this.initializeAdyen();
+                        this.status = 'ready';
+                    } catch (err) {
+                        console.error('createOrderAndInitAdyen: Caught error:', err);
+                        this.errorMessage = `Order Error: ${err.message}`;
+                        this.status = 'error';
+                    }
+                },
+
+                async initializeAdyen() {
+                    const checkout = await AdyenCheckout({
+                        environment: 'test',
+                        clientKey: this.clientKey,
+                        analytics: { enabled: false }
+                    });
+
+                    this.adyenCardComponent = checkout.create('card').mount('#card-container');
+                    console.log('initializeAdyen: Adyen card component mounted.', this.adyenCardComponent);
+                },
+
+                async makePayment() {
+                    if (!this.adyenCardComponent || !this.adyenCardComponent.data.paymentMethod) {
+                        this.errorMessage = 'Card details are incomplete.';
+                        return;
+                    }
+                    
+                    this.status = 'loading';
+                    this.errorMessage = '';
+                    this.paymentResponse = {};
+
+                    try {
+                        const response = await fetch('/api/payments', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                orderId: this.order.orderId,
+                                amount: { value: 10000, currency: "USD" },
+                                paymentMethod: this.adyenCardComponent.data.paymentMethod,
+                                browserInfo: {
+                                    userAgent: navigator.userAgent,
+                                    acceptHeader: "application/json, text/plain, */*",
+                                    language: navigator.language,
+                                    screenWidth: window.screen.width,
+                                    screenHeight: window.screen.height,
+                                    timeZoneOffset: new Date().getTimezoneOffset(),
+                                    colorDepth: window.screen.colorDepth,
+                                    javaEnabled: navigator.javaEnabled(),
+                                },
+                                returnUrl: window.location.href // For 3DS redirects
+                            })
+                        });
+
+                        this.paymentResponse = await response.json();
+
+                        if (!response.ok) {
+                             throw new Error(this.paymentResponse.message || 'Payment failed.');
+                        }
+
+                        if (this.paymentResponse.action) {
+                            console.log('makePayment: Handling Adyen action:', this.paymentResponse.action);
+                            this.adyenCardComponent.handleAction(this.paymentResponse.action, '#action-container');
+                            this.status = 'pendingAction'; // Indicate that an action is pending
+                        } else if (this.paymentResponse.resultCode === 'Authorised') {
+                            this.status = 'success';
+                        } else {
+                            this.status = 'error';
+                        }
+
+                    } catch (err) {
+                        this.errorMessage = `Payment Error: ${err.message}`;
+                        this.status = 'error';
+                    }
+                }
+            };
+        }
+    </script>
+</body>
+</html>

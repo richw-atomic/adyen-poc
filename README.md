@@ -87,3 +87,15 @@ npm start
 ```
 
 The application will be running on the port specified in your configuration.
+
+## Troubleshooting
+
+1. No response from Adyen?
+   - Ensure your ngrok tunnel is running and the URL is correctly set in your Adyen webhook configuration.
+   - Check the logs for any errors related to Adyen API calls.
+
+1. No redirect after 3ds2 challenge?
+   - Ensure the `clientReturnUrl` is correctly set in your payment payload.
+   - Check the logs for any errors related to the payment processing.
+   - Ensure you have whitelisted the `clientReturnUrl` in your Adyen Customer Area.
+   - Ensure the protocol for `clientReturnUrl` matches the whitelisted URLs in your Adyen Customer Area.
