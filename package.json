@@ -1,0 +1,29 @@
+{
+  "name": "app",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "type": "commonjs",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/richw-atomic/adyen-poc.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/richw-atomic/adyen-poc/issues"
+  },
+  "homepage": "https://github.com/richw-atomic/adyen-poc#readme",
+  "dependencies": {
+    "@adyen/api-library": "^27.0.1",
+    "dotenv": "^17.0.1",
+    "ejs": "^3.1.10",
+    "express": "^5.1.0",
+    "nedb": "^1.8.0",
+    "uuid": "^11.1.0"
+  }
+}

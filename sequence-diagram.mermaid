@@ -1,0 +1,65 @@
+sequenceDiagram
+    actor BROWSER as User's Browser
+    participant API as API Server
+    participant ADYEN as Adyen Platform
+    participant THIRDAUTH as 3rd Party Auth
+
+    %% --- Order Creation ---
+    BROWSER->>API: 1. POST /api/orders
+    activate API
+    API->>ADYEN: 2. POST /orders
+    activate ADYEN
+    ADYEN-->>API: 3. Order ID & Data
+    deactivate ADYEN
+    API->>API: 4. Store Order Ref in DB
+    API-->>BROWSER: 5. Return Order Data
+    deactivate API
+
+    %% --- Get Payment Methods ---
+    BROWSER->>API: 6. POST /api/payment-methods
+    activate API
+    API->>ADYEN: 7. POST /payment-methods
+    activate ADYEN
+    ADYEN-->>API: 8. Return available methods
+    deactivate ADYEN
+    API-->>BROWSER: 9. Return methods list
+    deactivate API
+
+    %% --- Payment Initialization & Submission ---
+    BROWSER->>ADYEN: 10. Init Adyen Components
+    BROWSER->>ADYEN: 11. User submits details via Component
+    
+    BROWSER->>API: 12. POST /api/payments
+    activate API
+    API->>ADYEN: 13. POST /payments
+    activate ADYEN
+    ADYEN-->>API: 14. Return Payment ID & Next Steps
+    deactivate ADYEN
+    API-->>BROWSER: 15. Return result & next actions
+    deactivate API
+
+    %% --- 3DS Challenge (Conditional) ---
+    alt 3DS Challenge Required
+        BROWSER->>THIRDAUTH: 16. Initiate 3DS Challenge
+        activate THIRDAUTH
+        THIRDAUTH-->>BROWSER: 17. Challenge Result
+        deactivate THIRDAUTH
+
+        %% --- Submit Payment Details ---
+        BROWSER->>API: 18. POST /api/payments/details
+        activate API
+        API->>ADYEN: 19. POST /payment-details
+        activate ADYEN
+        ADYEN-->>API: 20. Return step status
+        deactivate ADYEN
+        API->>API: 21. Store payment info in DB
+        API-->>BROWSER: 22. Return final payment status
+        deactivate API
+    end
+
+    %% --- Asynchronous Webhook ---
+    note right of ADYEN: Later, independently...
+    ADYEN->>API: 23. Webhook (e.g., AUTHORISATION)
+    activate API
+    API->>API: 24. Update DB with final status
+    deactivate API

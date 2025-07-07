@@ -1,0 +1,30 @@
+graph TD
+    %% Define the main components
+    Browser("User's Browser / App (Web / Mobile Client)")
+    Adyen("Adyen Platform")
+    Bank("3rd Party Bank (for 3DS)")
+
+    %% Group your backend components into a single unit
+    subgraph YourApplication [Application Stack]
+        direction TB
+        API("API Server")
+        DB("Database")
+    end
+    
+    %% Define the primary interaction flows
+    Browser -- "1 API Requests (e.g., /orders)" --> API
+    API -- "2 Server-to-Server API Calls" --> Adyen
+    API -- "Reads/Writes Order & Payment Data" --> DB
+
+    Browser -- "3 Securely submits payment data via Adyen Components" --> Adyen
+    
+    Adyen -- "4 Initiates 3DS Redirect" --> Browser
+    Browser -- "5 User completes challenge" --> Bank
+    
+    Adyen -- "6 Asynchronous Webhooks (Payment Status)" --> API
+
+    %% Add some styling for clarity
+    style Browser fill:#e9f5fb,stroke:#1ca6ce
+    style YourApplication fill:#f2e8fd,stroke:#7f3ac7
+    style Adyen fill:#fff3e6,stroke:#fa922b
+    style Bank fill:#eaf8ef,stroke:#41b584
