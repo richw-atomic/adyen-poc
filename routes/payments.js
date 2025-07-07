@@ -13,7 +13,7 @@ const router = express.Router();
  */
 router.post('/', async (req, res) => {
     try {
-        const { orderId, amount, paymentMethod, storePaymentMethod, shopperReference, browserInfo, returnUrl: clientReturnUrl } = req.body;
+        const { orderId, amount, paymentMethod, storePaymentMethod, shopperReference, browserInfo, returnUrl } = req.body;
 
         if (!orderId || !amount || !amount.value || !amount.currency || !paymentMethod) {
             return res.status(400).json({ error: 'Invalid request: orderId, amount (value and currency), and paymentMethod are required.' });
@@ -41,9 +41,6 @@ router.post('/', async (req, res) => {
 
         const paymentId = uuidv4();
         const paymentMerchantRef = `PAYMENT-${paymentId}`;
-        const serverReturnUrl = `${req.protocol}://${req.get('host')}`;
-        console.log(`payments: serverReturnUrl sent to Adyen: ${serverReturnUrl}`);
-
         const paymentPayload = {
             merchantAccount: ADYEN_MERCHANT_ACCOUNT,
             amount: amount,
@@ -59,7 +56,7 @@ router.post('/', async (req, res) => {
                 },
             },
             browserInfo: browserInfo,
-            returnUrl: serverReturnUrl,
+            returnUrl,
             channel: 'Web',
             origin: `${req.protocol}://${req.get('host')}`
         };
@@ -95,7 +92,7 @@ router.post('/', async (req, res) => {
             resultCode: adyenPaymentResponse.resultCode || null,
             refusalReason: adyenPaymentResponse.refusalReason || null,
             shopperReference: storePaymentMethod ? shopperReference : null,
-            clientReturnUrl: clientReturnUrl,
+            clientReturnUrl: returnUrl,
         };
         await paymentsDb.insertAsync(addTimestampsToDoc(newPayment));
 
@@ -195,7 +192,7 @@ router.all('/details/:paymentId', async (req, res) => {
         console.log(`Attempting Adyen /payments/details for payment ${internalPaymentId}:`, JSON.stringify(paymentDetailsPayload, null, 2));
         
         // Use the new checkout.paymentsApi.submitPaymentDetails method
-        const adyenDetailsResponse = await checkout.paymentsApi.submitPaymentDetails(paymentDetailsPayload);
+        const adyenDetailsResponse = await checkout.PaymentsApi.paymentsDetails(paymentDetailsPayload);
         
         console.log(`Adyen /payments/details response for payment ${internalPaymentId}:`, JSON.stringify(adyenDetailsResponse, null, 2));
 
@@ -253,21 +250,6 @@ router.all('/details/:paymentId', async (req, res) => {
             }
         }
 
-        if (paymentAttempt.clientReturnUrl) {
-            const redirectUrl = new URL(paymentAttempt.clientReturnUrl);
-            redirectUrl.searchParams.append('paymentId', internalPaymentId);
-            redirectUrl.searchParams.append('resultCode', adyenDetailsResponse.resultCode);
-            if (adyenDetailsResponse.pspReference) {
-                 redirectUrl.searchParams.append('pspReference', adyenDetailsResponse.pspReference);
-            }
-            if (adyenDetailsResponse.refusalReason) {
-                redirectUrl.searchParams.append('refusalReason', adyenDetailsResponse.refusalReason);
-            }
-            console.log(`payments/details: clientReturnUrl stored: ${paymentAttempt.clientReturnUrl}`);
-            console.log(`payments/details: Redirecting client to: ${redirectUrl.toString()}`);
-            return res.redirect(redirectUrl.toString());
-        }
-
         res.status(200).json({
             paymentId: internalPaymentId,
             orderId: paymentAttempt.orderId,
@@ -286,19 +268,6 @@ router.all('/details/:paymentId', async (req, res) => {
         const errorMessage = err.message || 'Failed to process payment details.';
         const errorDetails = err.details || null;
         const statusCode = err.statusCode || 500;
-
-        const internalPaymentId = req.params.paymentId;
-        if (internalPaymentId) {
-            const paymentAttempt = await paymentsDb.findOneAsync({ _id: internalPaymentId });
-            if (paymentAttempt && paymentAttempt.clientReturnUrl) {
-                const redirectUrl = new URL(paymentAttempt.clientReturnUrl);
-                redirectUrl.searchParams.append('paymentId', internalPaymentId);
-                redirectUrl.searchParams.append('resultCode', 'Error');
-                redirectUrl.searchParams.append('errorMessage', errorMessage);
-                console.log(`Redirecting client to error URL: ${redirectUrl.toString()}`);
-                return res.redirect(redirectUrl.toString());
-            }
-        }
 
         res.status(statusCode).json({
             error: 'Adyen API Error',

@@ -44,7 +44,7 @@ app.use('/api/webhooks', express.raw({ type: 'application/json' }));
 const orderRoutes = require('./routes/orders');
 const paymentRoutes = require('./routes/payments');
 const webhookRoutes = require('./routes/webhooks');
-const storedPaymentMethodsRoutes = require('./routes/storedPaymentMethods');
+const paymentMethodsRoutes = require('./routes/paymentMethods');
 
 // IMPORTANT for Webhooks:
 // If express.json() is used globally (like below), HMAC validation requiring the raw request body
@@ -62,7 +62,7 @@ app.get('/', (req, res) => {
 app.use('/api/orders', orderRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/webhooks', webhookRoutes);
-app.use('/api/stored-payment-methods', storedPaymentMethodsRoutes);
+app.use('/api/payment-methods', paymentMethodsRoutes);
 
 
 // Basic Error Handling

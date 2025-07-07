@@ -1,0 +1,57 @@
+erDiagram
+    %% --- 1. Order Creation ---
+    CreateOrderRequest {
+        object amount "{ value, currency } (total amount)"
+    }
+    CreateOrderResponse {
+        string orderId "Your internal Order ID"
+        string pspReference "Adyen's PSP Reference for the *Order*"
+        object totalAmount "{ value, currency }"
+        object remainingAmount "{ value, currency }"
+        string orderData "The crucial order data blob for subsequent payments"
+    }
+
+    %% --- 2. Making a Partial Payment ---
+    MakePaymentRequest {
+        string orderId "Your internal Order ID"
+        string orderData "The latest orderData blob from the previous step"
+        object amount "{ value, currency } (for this specific payment)"
+        object paymentMethod "{ type, number, ... } or storedPaymentMethodId"
+        string returnUrl "URL for Adyen to redirect to after a challenge"
+    }
+    MakePaymentResponse {
+        string pspReference "PSP Reference for the *Payment*"
+        string resultCode "e.g., Authorised, Refused, RedirectShopper"
+        object action "The action object for 3DS/redirects, if needed"
+        object order "Contains updated remainingAmount and new orderData"
+    }
+
+    %% --- 3. Submitting Details after a Challenge ---
+    SubmitDetailsRequest {
+        object details "{ redirectResult, payload, ... }"
+    }
+    PaymentDetailsResponse {
+        string pspReference "Final PSP Reference for the *Payment*"
+        string resultCode "e.g., Authorised, Refused"
+        object order "Contains final remainingAmount and orderData for this step"
+    }
+
+    %% --- 4. Adyen Webhook Notification ---
+    WebhookNotification {
+        string live
+        array notificationItems
+    }
+    NotificationRequestItem {
+        string eventCode "ORDER_OPENED, AUTHORISATION, ORDER_CLOSED"
+        boolean success
+        string pspReference "Can be for an Order or a Payment"
+        string merchantReference "Your internal reference"
+        object amount "{ value, currency }"
+        string reason "Details on success/failure"
+    }
+
+    %% --- Relationships ---
+    CreateOrderRequest ||--o{ CreateOrderResponse : "initiates"
+    MakePaymentRequest ||--o{ MakePaymentResponse : "attempts"
+    SubmitDetailsRequest ||--o{ PaymentDetailsResponse : "completes"
+    WebhookNotification }o--|| NotificationRequestItem : "contains"
