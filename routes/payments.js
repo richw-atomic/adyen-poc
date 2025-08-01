@@ -1,7 +1,7 @@
 const express = require('express');
 const { v4: uuidv4 } = require('uuid');
 const { checkout, ADYEN_MERCHANT_ACCOUNT } = require('../config/adyenConfig');
-const { ordersDb, paymentsDb, tokensDb, addTimestampsToDoc, getUpdateWithTimestamps } = require('../utils/db');
+const { ordersDb, paymentsDb, tokensDb, addTimestampsToDoc, getUpdateWithTimestamps, sessionsDb } = require('../utils/db');
 
 
 const router = express.Router();
@@ -160,8 +160,70 @@ router.post('/', async (req, res) => {
     }
 });
 
+router.all('/details/session/:sessionId', async (req, res) => {
+    console.log(`Request received with method ${req.method} for /payments/details/session/${req.params.sessionId}`);
+    try {
+        const internalSessionId = req.params.sessionId;
+        const detailsFromAdyen = req.body.details || (req.body.payload ? { payload: req.body.payload } : req.body);
+
+        if (!internalSessionId || !detailsFromAdyen || Object.keys(detailsFromAdyen).length === 0) {
+            return res.status(400).json({ error: 'Missing sessionId or details from Adyen redirect.' });
+        }
+
+        const session = await sessionsDb.findOneAsync({ id: internalSessionId });
+        if (!session) {
+            return res.status(404).json({ error: 'session not found.' });
+        }
+        
+        const paymentDetailsPayload = {
+            paymentData: session.action ? session.action.paymentData : undefined,
+            details: detailsFromAdyen,
+        };
+
+        console.log(`Attempting Adyen /payments/details for payment ${internalSessionId}:`, JSON.stringify(paymentDetailsPayload, null, 2));
+        
+        const adyenDetailsResponse = await checkout.PaymentsApi.paymentsDetails(paymentDetailsPayload);
+        
+        console.log(`Adyen /payments/details response for payment ${internalSessionId}:`, JSON.stringify(adyenDetailsResponse, null, 2));
+
+        await sessionsDb.updateAsync(
+            { id: internalSessionId },
+            getUpdateWithTimestamps({
+                $set: {
+                    status: adyenDetailsResponse.resultCode || 'pendingWebhook',
+                    resultCode: adyenDetailsResponse.resultCode,
+                    refusalReason: adyenDetailsResponse.refusalReason,
+                    adyenPaymentPspReference: adyenDetailsResponse.pspReference,
+                    action: null,
+                }
+            })
+        );
+
+        res.status(200).json({
+            sessionId: internalSessionId,
+            pspReference: adyenDetailsResponse.pspReference,
+            resultCode: adyenDetailsResponse.resultCode,
+            refusalReason: adyenDetailsResponse.refusalReason,
+            message: "Payment details submitted. Final status will be confirmed via webhook."
+        });
+
+    } catch (err) {
+        console.error('Error processing Adyen payment details:', err);
+        const errorMessage = err.message || 'Failed to process payment details.';
+        const errorDetails = err.details || null;
+        const statusCode = err.statusCode || 500;
+
+        res.status(statusCode).json({
+            error: 'Adyen API Error',
+            message: errorMessage,
+            details: errorDetails,
+            pspReference: err.pspReference || null
+        });
+    }
+});
+
 /**
- * @route   POST /api/payments/details/:paymentId
+ * @route   POST | GET /api/payments/details/:paymentId
  * @desc    Handle the redirect from Adyen after 3DS or other challenges
  */
 router.all('/details/:paymentId', async (req, res) => {

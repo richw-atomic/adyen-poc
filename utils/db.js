@@ -44,6 +44,10 @@ const ordersDbInstance = new Datastore({
     filename: process.env.ORDERS_DB_PATH || path.join(dataDir, 'orders.db'),
     autoload: true
 });
+const sessionsDbInstance = new Datastore({
+    filename: process.env.SESSIONS_DB_PATH || path.join(dataDir, 'sessions.db'),
+    autoload: true
+});
 const paymentsDbInstance = new Datastore({
     filename: process.env.PAYMENTS_DB_PATH || path.join(dataDir, 'payments.db'),
     autoload: true
@@ -56,11 +60,13 @@ const tokensDbInstance = new Datastore({
 // Log if databases are file-backed or in-memory
 const dbPaths = {
     orders: process.env.ORDERS_DB_PATH || (fs.existsSync(dataDir) ? path.join(dataDir, 'orders.db') : 'in-memory'),
+    sessions: process.env.SESSIONS_DB_PATH || (fs.existsSync(dataDir) ? path.join(dataDir, 'sessions.db') : 'in-memory'),
     payments: process.env.PAYMENTS_DB_PATH || (fs.existsSync(dataDir) ? path.join(dataDir, 'payments.db') : 'in-memory'),
     tokens: process.env.TOKENS_DB_PATH || (fs.existsSync(dataDir) ? path.join(dataDir, 'tokens.db') : 'in-memory')
 };
 
 console.log('NeDB ordersDb location:', dbPaths.orders.includes('in-memory') && !process.env.ORDERS_DB_PATH ? 'in-memory' : dbPaths.orders);
+console.log('NeDB sessionsDb location:', dbPaths.sessions.includes('in-memory') && !process.env.SESSIONS_DB_PATH ? 'in-memory' : dbPaths.sessions);
 console.log('NeDB paymentsDb location:', dbPaths.payments.includes('in-memory') && !process.env.PAYMENTS_DB_PATH ? 'in-memory' : dbPaths.payments);
 console.log('NeDB tokensDb location:', dbPaths.tokens.includes('in-memory') && !process.env.TOKENS_DB_PATH ? 'in-memory' : dbPaths.tokens);
 
@@ -92,6 +98,7 @@ const getUpdateWithTimestamps = (updateQuery) => {
 
 module.exports = {
     ordersDb: promisifyNeDB(ordersDbInstance),
+    sessionsDb: promisifyNeDB(sessionsDbInstance),
     paymentsDb: promisifyNeDB(paymentsDbInstance),
     tokensDb: promisifyNeDB(tokensDbInstance),
     addTimestampsToDoc,

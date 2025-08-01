@@ -30,10 +30,8 @@ router.post('/', async (req, res) => {
             reference: orderRef,
         };
 
-        console.log(checkout.OrdersApi);
-
         // Use the new checkout.orders.createOrder method
-        const adyenOrderResponse = await checkout.OrdersApi.orders(orderRequest);
+        const adyenOrderResponse = await checkout.OrdersApi.orders(orderRequest, { idempotencyKey: orderId });
 
         console.log(`Adyen /orders response for ${orderRef}:`, JSON.stringify(adyenOrderResponse, null, 2));
 

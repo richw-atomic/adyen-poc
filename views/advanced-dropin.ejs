@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Advanced Drop In</title>
+    <!-- Adyen CSS -->
+    <link
+      rel="stylesheet"
+      href="https://checkoutshopper-test.cdn.adyen.com/checkoutshopper/sdk/6.18.0/adyen.css"
+      integrity="sha384-lCDmpxn4G68y4vohxVVEuRcbz4iZTDh1u/FLlsCV1wSbibWKs+knhLQpgzPBqap4"
+      crossorigin="anonymous"
+    />
+    <!-- Simple CSS for styling -->
+    <style>
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          Helvetica, Arial, sans-serif;
+        margin: 0;
+        background-color: #f8f9fa;
+        display: flex;
+        justify-content: center;
+        padding-top: 40px;
+      }
+      .container {
+        max-width: 480px;
+        width: 100%;
+        background: #fff;
+        border-radius: 8px;
+        box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+        padding: 20px 30px;
+      }
+      h1 {
+        font-size: 24px;
+        margin-bottom: 20px;
+        text-align: center;
+      }
+      .input-group {
+        margin-bottom: 15px;
+      }
+      label {
+        display: block;
+        font-weight: 500;
+        margin-bottom: 5px;
+      }
+      input[type="text"] {
+        width: 100%;
+        padding: 10px;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+        box-sizing: border-box;
+      }
+      button:disabled {
+        background-color: #a0a0a0;
+        cursor: not-allowed;
+      }
+      .adyen-checkout__label__text {
+        font-weight: 500;
+      }
+      #card-container {
+        border: 1px solid #e8e8e8;
+        border-radius: 4px;
+        padding: 10px;
+        margin-top: 20px;
+      }
+      pre {
+        background-color: #2d2d2d;
+        color: #f2f2f2;
+        padding: 15px;
+        border-radius: 4px;
+        white-space: pre-wrap;
+        word-wrap: break-word;
+        font-family: "SF Mono", "Fira Code", "Source Code Pro", monospace;
+      }
+      .status-message {
+        text-align: center;
+        padding: 10px;
+        border-radius: 4px;
+        margin-top: 15px;
+      }
+      .error {
+        background-color: #f8d7da;
+        color: #721c24;
+      }
+      .success {
+        background-color: #d4edda;
+        color: #155724;
+      }
+    </style>
+    <!-- Alpine.js -->
+    <script
+      defer
+      src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"
+    ></script>
+    <!-- Adyen JS -->
+    <script
+      src="https://checkoutshopper-test.cdn.adyen.com/checkoutshopper/sdk/6.18.0/adyen.js"
+      integrity="sha384-ZEPvk8M++Rrf/1zMUvnfdO73cZlnj/u9oAGHSeUIIgOXoW0ZrwfyB6pBcIrhDbdd"
+      crossorigin="anonymous"
+    ></script>
+  </head>
+  <body>
+    <div class="container" x-data="adyenCheckout()">
+      <h1>Advanced Adyen Drop In</h1>
+
+      <!-- Loading State -->
+      <div x-show="status === 'loading'">
+        <p style="text-align: center">Loading Checkout...</p>
+      </div>
+
+      <p>Current Status: <span x-text="status"></span></p>
+
+      <div id="component-container"></div>
+
+      <!-- Container for 3DS2 challenge -->
+      <div
+        id="action-container"
+        style="margin-top: 20px"
+        x-show="status === 'pendingAction'"
+      ></div>
+
+      <!-- Status and Response Display -->
+      <div
+        x-show="errorMessage"
+        class="status-message error"
+        x-text="errorMessage"
+      ></div>
+      <div
+        x-show="paymentResponse.resultCode === 'Authorised'"
+        class="status-message success"
+      >
+        Payment Authorised! PSP Reference:
+        <span x-text="paymentResponse.pspReference"></span>
+      </div>
+
+      <div
+        x-show="['IdentifyShopper', 'ChallengeShopper'].includes(paymentResponse.resultCode)"
+        class="status-message"
+      >
+        <p>3D Secure authentication required. Please complete the challenge.</p>
+        <p>Result Code: <span x-text="paymentResponse.resultCode"></span></p>
+      </div>
+
+      <div
+        x-show="['Refused', 'Error', 'Cancelled'].includes(paymentResponse.resultCode)"
+        class="status-message error"
+      >
+        Payment <span x-text="paymentResponse.resultCode"></span>. Reason:
+        <span x-text="paymentResponse.refusalReason || 'N/A'"></span>
+      </div>
+
+      <template x-if="paymentResponse.resultCode">
+        <pre x-text="JSON.stringify(paymentResponse, null, 2)"></pre>
+      </template>
+    </div>
+
+    <script>
+      function adyenCheckout() {
+        const amount = { value: 9000, currency: "GBP" };
+        return {
+          clientKey: "<%- clientKey %>", // Injected by EJS
+          order: {},
+          amount,
+          paymentResponse: {},
+          paymentMethods: {},
+          adyenDropinComponent: null,
+          status: "initial", // initial, loading, ready, error, success
+          errorMessage: "",
+
+          init() {
+            if (
+              !this.clientKey ||
+              this.clientKey.includes("YOUR_ADYEN_CLIENT_KEY")
+            ) {
+              this.errorMessage =
+                "Adyen Client Key not configured on the server. Please set ADYEN_CLIENT_KEY in your .env file.";
+              this.status = "error";
+              return;
+            }
+
+            const urlParams = new URLSearchParams(window.location.search);
+            const paymentId = urlParams.get("paymentId");
+            const resultCode = urlParams.get("resultCode");
+            const errorMessage = urlParams.get("errorMessage");
+
+            if (paymentId && resultCode) {
+              this.paymentResponse = {
+                paymentId: paymentId,
+                resultCode: resultCode,
+                pspReference: urlParams.get("pspReference"),
+                refusalReason: urlParams.get("refusalReason"),
+              };
+              if (errorMessage) {
+                this.errorMessage = `Payment Error: ${errorMessage}`;
+                this.status = "error";
+              } else if (resultCode === "Authorised") {
+                this.status = "success";
+              } else if (
+                ["IdentifyShopper", "ChallengeShopper"].includes(resultCode)
+              ) {
+                this.status = "pendingAction";
+              } else {
+                this.status = "error";
+              }
+              window.history.replaceState(
+                {},
+                document.title,
+                window.location.pathname
+              );
+              this.initializeAdyen();
+            } else {
+              this.initPayment();
+            }
+          },
+
+          async initPayment() {
+            this.status = "loading";
+            this.errorMessage = "";
+            try {
+              await Promise.all([
+                this.createOrder(),
+                this.loadPaymentMethods(),
+              ]);
+              await this.initializeAdyen();
+              this.status = "ready";
+            } catch (err) {
+              console.error("initAdyen: Caught error:", err);
+              this.errorMessage = `Order Error: ${err.message}`;
+              this.status = "error";
+            }
+          },
+
+          async loadPaymentMethods() {
+            try {
+              console.log(
+                "loadPaymentMethods: Attempting to fetch /api/payment-methods..."
+              );
+              const response = await fetch("/api/payment-methods", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ amount }),
+              });
+
+              console.log(
+                "loadPaymentMethods: Received response from /api/payment-methods."
+              );
+              if (!response.ok) {
+                const err = await response.json();
+                console.error(
+                  "loadPaymentMethods: Server responded with error:",
+                  err
+                );
+                throw new Error(err.message || "Failed to create order.");
+              }
+              const paymentMethods = await response.json();
+              console.log(
+                "loadPaymentMethods: Payment methods loaded successfully.",
+                paymentMethods
+              );
+              Object.assign(this.paymentMethods, paymentMethods);
+            } catch (err) {
+              console.error("loadPaymentMethods: Caught error:", err);
+            }
+          },
+
+          async initializeAdyen() {
+            console.log(this.paymentMethods);
+            const checkout = await AdyenWeb.AdyenCheckout({
+              paymentMethodsResponse: this.paymentMethods,
+              clientKey: this.clientKey,
+              locale: "en-US",
+              countryCode: "GB",
+              environment: "test",
+              onSubmit: async (state, component, actions) => {
+                try {
+                  console.log(state);
+                  const result = await this.makePayment();
+                  console.log(result);
+                  // If the /payments request from your server fails, or if an unexpected error occurs.
+                  if (!result.resultCode) {
+                    actions.reject();
+                    return;
+                  }
+
+                  const { resultCode, action, order, donationToken } = result;
+
+                  // If the /payments request request form your server is successful, you must call this to resolve whichever of the listed objects are available.
+                  // You must call this, even if the result of the payment is unsuccessful.
+                  actions.resolve({
+                    resultCode,
+                    action,
+                    order,
+                    donationToken,
+                  });
+                } catch (error) {
+                  console.error("onSubmit", error);
+                  actions.reject();
+                }
+              },
+              onAdditionalDetails: async (state, component, actions) => {
+                try {
+                  console.log(state);
+                  // Make a POST /payments/details request from your server.
+                  const result = await this.addPaymentDetails(state.data);
+
+                  // If the /payments/details request from your server fails, or if an unexpected error occurs.
+                  if (!result.resultCode) {
+                    actions.reject();
+                    return;
+                  }
+
+                  const { resultCode, action, order, donationToken } = result;
+
+                  // If the /payments/details request request from your server is successful, you must call this to resolve whichever of the listed objects are available.
+                  // You must call this, even if the result of the payment is unsuccessful.
+                  actions.resolve({
+                    resultCode,
+                    action,
+                    order,
+                    donationToken,
+                  });
+                } catch (error) {
+                  console.error("onSubmit", error);
+                  actions.reject();
+                }
+              },
+              onPaymentCompleted: (result, component) => {
+                console.info(result, component);
+              },
+              onPaymentFailed: (result, component) => {
+                console.info(result, component);
+              },
+              //   onOrderCancel: async (order) => {
+              //     await cancelOrder(order);
+              //     checkout.update(order);
+              //   },
+              onError: (error, component) => {
+                console.error(
+                  error.name,
+                  error.message,
+                  error.stack,
+                  component
+                );
+                console.log(component);
+              },
+            });
+            console.log(checkout);
+            this.adyenDropinComponent = new AdyenWeb.Dropin(checkout).mount(
+              "#component-container"
+            );
+            console.log(
+              "initializeAdyen: Adyen dropin component mounted.",
+              this.adyenDropinComponent,
+            );
+          },
+
+          async createOrder() {
+            try {
+              console.log("createOrder: Attempting to fetch /api/orders...");
+              const response = await fetch("/api/orders", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ amount }),
+              });
+
+              console.log("createOrder: Received response from /api/orders.");
+              if (!response.ok) {
+                const err = await response.json();
+                console.error("createOrder: Server responded with error:", err);
+                throw new Error(err.message || "Failed to create order.");
+              }
+
+              Object.assign(this.order, await response.json());
+              console.log("createOrder: Order created:", this.order);
+            } catch (error) {
+              this.errorMessage = `Payment Error: ${err.message}`;
+              this.status = "error";
+              throw error;
+            }
+          },
+
+          async makePayment() {
+            if (!this.adyenDropinComponent) {
+              this.errorMessage = "Adyen component not ready.";
+              return;
+            }
+
+            this.status = "loading";
+            this.errorMessage = "";
+            this.paymentResponse = {};
+
+            try {
+              const response = await fetch("/api/payments", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  orderId: this.order.orderId,
+                  amount: this.amount,
+                  paymentMethod: this.adyenDropinComponent.data.paymentMethod,
+                  browserInfo: {
+                    userAgent: navigator.userAgent,
+                    acceptHeader: "application/json, text/plain, */*",
+                    language: navigator.language,
+                    screenWidth: window.screen.width,
+                    screenHeight: window.screen.height,
+                    timeZoneOffset: new Date().getTimezoneOffset(),
+                    colorDepth: window.screen.colorDepth,
+                    javaEnabled: navigator.javaEnabled(),
+                  },
+                  returnUrl: window.location.href, // For 3DS redirects
+                }),
+              });
+
+              this.paymentResponse = await response.json();
+
+              if (!response.ok) {
+                throw new Error(
+                  this.paymentResponse.message || "Payment failed."
+                );
+              }
+
+              if (this.paymentResponse.action) {
+                console.log(
+                  "makePayment: Handling Adyen action:",
+                  this.paymentResponse.action
+                );
+                this.status = "pendingAction"; // Indicate that an action is pending
+              } else if (this.paymentResponse.resultCode === "Authorised") {
+                this.status = "success";
+              } else {
+                this.status = "error";
+              }
+              return this.paymentResponse;
+            } catch (err) {
+              this.errorMessage = `Payment Error: ${err.message}`;
+              this.status = "error";
+            }
+          },
+          async addPaymentDetails(data) {
+            try {
+              const response = await fetch(`/api/payments/details/${this.paymentResponse.paymentId}`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(data),
+              });
+
+              this.paymentResponse = await response.json();
+
+              if (!response.ok) {
+                throw new Error(
+                  this.paymentResponse.message || "Payment confirmation failed."
+                );
+              }
+
+              return this.paymentResponse;
+            } catch (err) {
+              this.errorMessage = `Payment Error: ${err.message}`;
+              this.status = "error";
+            }
+          },
+        };
+      }
+    </script>
+  </body>
+</html>
