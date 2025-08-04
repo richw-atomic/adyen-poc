@@ -1,0 +1,40 @@
+<!-- Container for 3DS2 challenge -->
+<div
+  id="action-container"
+  style="margin-top: 20px"
+  x-show="status === 'pendingAction'"
+></div>
+
+<!-- Status and Response Display -->
+<div
+  x-show="errorMessage"
+  class="status-message error"
+  x-text="errorMessage"
+></div>
+<div
+  x-show="paymentResponse.resultCode === 'Authorised'"
+  class="status-message success"
+>
+  Payment Authorised! PSP Reference:
+  <span x-text="paymentResponse.pspReference"></span>
+</div>
+
+<div
+  x-show="['IdentifyShopper', 'ChallengeShopper'].includes(paymentResponse.resultCode)"
+  class="status-message"
+>
+  <p>3D Secure authentication required. Please complete the challenge.</p>
+  <p>Result Code: <span x-text="paymentResponse.resultCode"></span></p>
+</div>
+
+<div
+  x-show="['Refused', 'Error', 'Cancelled'].includes(paymentResponse.resultCode)"
+  class="status-message error"
+>
+  Payment <span x-text="paymentResponse.resultCode"></span>. Reason:
+  <span x-text="paymentResponse.refusalReason || 'N/A'"></span>
+</div>
+
+<template x-if="paymentResponse.resultCode">
+  <pre x-text="JSON.stringify(paymentResponse, null, 2)"></pre>
+</template>
