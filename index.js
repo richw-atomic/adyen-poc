@@ -40,10 +40,10 @@ app.get('/advanced/dropin', (req, res) => {
 app.get('/sessions/dropin', (req, res) => {
     res.render('sessions-dropin', { clientKey: process.env.ADYEN_CLIENT_KEY || 'YOUR_ADYEN_CLIENT_KEY' });
 });
-app.get('/advanced/component', (req, res) => {
+app.get('/advanced/components', (req, res) => {
     res.render('advanced-component', { clientKey: process.env.ADYEN_CLIENT_KEY || 'YOUR_ADYEN_CLIENT_KEY' });
 });
-app.get('/sessions/component', (req, res) => {
+app.get('/sessions/components', (req, res) => {
     res.render('sessions-component', { clientKey: process.env.ADYEN_CLIENT_KEY || 'YOUR_ADYEN_CLIENT_KEY' });
 });
 
