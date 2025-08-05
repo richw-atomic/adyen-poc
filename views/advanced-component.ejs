@@ -17,7 +17,44 @@
 
       <p>Current Status: <span x-text="status"></span></p>
 
-      <div x-show="status !== 'success'">
+      <div x-show="remainingAmount.value > 0 && paidAmount.value > 0">
+        <h3>Payment Details</h3>
+        <p>
+          Total Paid: <span x-text="paidAmount.value / 100"></span>
+          <span x-text="paidAmount.currency"></span>
+        </p>
+        <p>
+          Remaining: <span x-text="remainingAmount.value / 100"></span>
+          <span x-text="remainingAmount.currency"></span>
+        </p>
+      </div>
+
+      <!-- Payment Options -->
+      <div x-show="status === 'initial' && remainingAmount.value > 0">
+        <div x-show="!paymentChoice">
+          <p>How would you like to pay?</p>
+          <button @click="setPaymentChoice('full')">
+            Pay Full Amount (<span x-text="remainingAmount.value / 100"></span>
+            <span x-text="remainingAmount.currency"></span>)
+          </button>
+          <button @click="setPaymentChoice('partial')">
+            Pay Partial Amount
+          </button>
+        </div>
+
+        <div x-show="paymentChoice === 'partial'">
+          <label for="partialAmount">Amount to pay:</label>
+          <input
+            type="number"
+            id="partialAmount"
+            x-model.number="partialAmountValue"
+          />
+          <button @click="initPartialPayment">Pay Partial Amount</button>
+        </div>
+      </div>
+
+      <!-- Component container -->
+      <div x-show="status === 'ready'">
         <div id="component-scheme-container"></div>
         <div class="wallets-wrapper">
           <div id="component-applepay-container"></div>
@@ -30,16 +67,21 @@
 
     <script>
       function adyenCheckout() {
-        const amount = { value: 9000, currency: "GBP" };
         return {
           clientKey: "<%- clientKey %>", // Injected by EJS
           order: {},
-          amount,
+          totalAmount: { value: 9000, currency: "GBP" },
+          paymentAmount: { value: 0, currency: "GBP" },
+          remainingAmount: { value: 9000, currency: "GBP" },
+          paidAmount: { value: 0, currency: "GBP" },
+          partialAmountValue: 0,
           paymentResponse: {},
           paymentMethods: {},
           adyenDropinComponent: {},
+          adyenCheckoutInstance: null,
           status: "initial", // initial, loading, ready, error, success
           errorMessage: "",
+          paymentChoice: null, // 'full', 'partial'
 
           init() {
             if (
@@ -51,293 +93,220 @@
               this.status = "error";
               return;
             }
-
+            // Handle redirect
             const urlParams = new URLSearchParams(window.location.search);
-            const paymentId = urlParams.get("paymentId");
-            const resultCode = urlParams.get("resultCode");
-            const errorMessage = urlParams.get("errorMessage");
-
-            if (paymentId && resultCode) {
-              this.paymentResponse = {
-                paymentId: paymentId,
-                resultCode: resultCode,
-                pspReference: urlParams.get("pspReference"),
-                refusalReason: urlParams.get("refusalReason"),
-              };
-              if (errorMessage) {
-                this.errorMessage = `Payment Error: ${errorMessage}`;
-                this.status = "error";
-              } else if (resultCode === "Authorised") {
-                this.status = "success";
-              } else if (
-                ["IdentifyShopper", "ChallengeShopper"].includes(resultCode)
-              ) {
-                this.status = "pendingAction";
-              } else {
-                this.status = "error";
-              }
-              window.history.replaceState(
-                {},
-                document.title,
-                window.location.pathname
-              );
-              this.initializeAdyen();
-            } else {
-              this.initPayment();
+            if (urlParams.get("resultCode")) {
+              this.status = "success"; // Or handle based on resultCode
+              // Potentially fetch order status from server here to get remaining amount
             }
           },
 
-          async initPayment() {
+          setPaymentChoice(choice) {
+            this.paymentChoice = choice;
+            if (choice === "full") {
+              this.paymentAmount = { ...this.remainingAmount };
+              this.startPayment();
+            }
+          },
+
+          initPartialPayment() {
+            if (
+              this.partialAmountValue <= 0 ||
+              this.partialAmountValue > this.remainingAmount.value / 100
+            ) {
+              this.errorMessage = "Invalid amount";
+              return;
+            }
+            this.paymentAmount = {
+              value: this.partialAmountValue * 100,
+              currency: "GBP",
+            };
+            this.startPayment();
+          },
+
+          async startPayment() {
             this.status = "loading";
             this.errorMessage = "";
             try {
-              await Promise.all([
-                this.createOrder(),
-                this.loadPaymentMethods(),
-              ]);
+              if (!this.order.orderId) {
+                await this.createOrder();
+              }
+              await this.loadPaymentMethods();
               await this.initializeAdyen();
               this.status = "ready";
             } catch (err) {
-              console.error("initAdyen: Caught error:", err);
-              this.errorMessage = `Order Error: ${err.message}`;
+              console.error("startPayment: Caught error:", err);
+              this.errorMessage = `Error: ${err.message}`;
               this.status = "error";
             }
           },
 
           async loadPaymentMethods() {
-            try {
-              console.log(
-                "loadPaymentMethods: Attempting to fetch /api/payment-methods..."
-              );
-              const response = await fetch("/api/payment-methods", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ amount }),
-              });
-
-              console.log(
-                "loadPaymentMethods: Received response from /api/payment-methods."
-              );
-              if (!response.ok) {
-                const err = await response.json();
-                console.error(
-                  "loadPaymentMethods: Server responded with error:",
-                  err
-                );
-                throw new Error(err.message || "Failed to create order.");
-              }
-              const paymentMethods = await response.json();
-              console.log(
-                "loadPaymentMethods: Payment methods loaded successfully.",
-                paymentMethods
-              );
-              Object.assign(this.paymentMethods, paymentMethods);
-            } catch (err) {
-              console.error("loadPaymentMethods: Caught error:", err);
+            // Uses this.paymentAmount
+            const response = await fetch("/api/payment-methods", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ amount: this.paymentAmount }),
+            });
+            if (!response.ok) {
+              const err = await response.json();
+              throw new Error(err.message || "Failed to load payment methods.");
             }
+            this.paymentMethods = await response.json();
           },
 
           async initializeAdyen() {
-            console.log(this.paymentMethods);
-            const checkout = await AdyenWeb.AdyenCheckout({
+            this.adyenCheckoutInstance = await AdyenWeb.AdyenCheckout({
               paymentMethodsResponse: this.paymentMethods,
               clientKey: this.clientKey,
               locale: "en-US",
               countryCode: "GB",
               environment: "test",
-              amount: this.amount,
-              onSubmit: async (state, component, actions) => {
-                try {
-                  console.log(state);
-                  const result = await this.makePayment(component);
-                  console.log(result);
-                  // If the /payments request from your server fails, or if an unexpected error occurs.
-                  if (!result.resultCode) {
-                    actions.reject();
-                    return;
-                  }
-
-                  const { resultCode, action, order, donationToken } = result;
-
-                  // If the /payments request request form your server is successful, you must call this to resolve whichever of the listed objects are available.
-                  // You must call this, even if the result of the payment is unsuccessful.
-                  actions.resolve({
-                    resultCode,
-                    action,
-                    order,
-                    donationToken,
-                  });
-                } catch (error) {
-                  console.error("onSubmit", error);
-                  actions.reject();
+              amount: this.paymentAmount,
+              onSubmit: async (state, component) => {
+                const result = await this.makePayment(component);
+                this.paymentResponse = result;
+                if (result.action) {
+                  this.status = "ready";
+                  component.handleAction(result.action);
+                } else if (result.resultCode === "Authorised") {
+                  this.handlePaymentSuccess(result);
+                } else {
+                  this.status = "error";
+                  this.errorMessage = result.refusalReason || "Payment failed";
                 }
               },
-              onAdditionalDetails: async (state, component, actions) => {
-                try {
-                  console.log(state);
-                  // Make a POST /payments/details request from your server.
-                  const result = await this.addPaymentDetails(state.data);
-
-                  // If the /payments/details request from your server fails, or if an unexpected error occurs.
-                  if (!result.resultCode) {
-                    actions.reject();
-                    return;
-                  }
-
-                  const { resultCode, action, order, donationToken } = result;
-
-                  // If the /payments/details request request from your server is successful, you must call this to resolve whichever of the listed objects are available.
-                  // You must call this, even if the result of the payment is unsuccessful.
-                  actions.resolve({
-                    resultCode,
-                    action,
-                    order,
-                    donationToken,
-                  });
-                } catch (error) {
-                  console.error("onSubmit", error);
-                  actions.reject();
+              onAdditionalDetails: async (state, component) => {
+                const result = await this.addPaymentDetails(state.data);
+                if (result.action) {
+                  component.handleAction(result.action);
+                } else if (result.resultCode === "Authorised") {
+                  this.handlePaymentSuccess(result);
+                } else {
+                  this.status = "error";
+                  this.errorMessage =
+                    result.refusalReason || "Payment details failed";
                 }
               },
-              onPaymentCompleted: (result, component) => {
-                console.info(result, component);
-              },
-              onPaymentFailed: (result, component) => {
-                console.info(result, component);
-              },
-              //   onOrderCancel: async (order) => {
-              //     await cancelOrder(order);
-              //     checkout.update(order);
-              //   },
-              onError: (error, component) => {
-                console.error(
-                  error.name,
-                  error.message,
-                  error.stack,
-                  component
-                );
-                console.log(component);
+              onError: (error) => {
+                this.status = "error";
+                this.errorMessage = error.message;
               },
             });
-            checkout.paymentMethodsResponse.paymentMethods.forEach((paymentMethod) => {
-              const paymentMethodClass = AdyenWeb[paymentMethod.name.replace(' ', '')];
-              if (paymentMethodClass) {
-                console.log(paymentMethod.type);
-                this.adyenDropinComponent[paymentMethod.type] = new paymentMethodClass(checkout).mount(
-                  `#component-${paymentMethod.type}-container`
-                );
-              } else if (paymentMethod.name === 'Cards') {
-                console.log(paymentMethod.type);
-                this.adyenDropinComponent[paymentMethod.type] = new AdyenWeb.Card(checkout).mount(
-                  `#component-${paymentMethod.type}-container`
-                );
+
+            // Clear previous components
+            document.getElementById("component-scheme-container").innerHTML =
+              "";
+            document.getElementById("component-applepay-container").innerHTML =
+              "";
+            document.getElementById("component-googlepay-container").innerHTML =
+              "";
+
+            this.adyenCheckoutInstance.paymentMethodsResponse.paymentMethods.forEach(
+              (pm) => {
+                try {
+                  if (this.adyenDropinComponent[pm.type]) {
+                    this.adyenDropinComponent[pm.type].unmount();
+                  }
+                  if (pm.name === 'Cards') {
+                    this.adyenDropinComponent[pm.type] = new AdyenWeb.Card(this.adyenCheckoutInstance)
+                      .mount("#component-scheme-container");
+                    return;
+                  } else {
+                    const paymentMethodClass = AdyenWeb[pm.name.replace(' ', '')];
+                    if (!paymentMethodClass) {
+                      throw new Error(`No AdyenWeb class found for payment method: ${pm.name}`);
+                    }
+                    this.adyenDropinComponent[pm.type] = new paymentMethodClass(this.adyenCheckoutInstance)
+                      .mount(`#component-${pm.type}-container`);
+                  }
+                } catch (e) {
+                  console.error(e);
+                  console.warn("Could not mount component for", pm.type);
+                }
               }
-            });
+            );
+          },
+
+          handlePaymentSuccess(result) {
+            console.log({result});
+            if (result.orderStatus) {
+              this.paidAmount = {
+                value:
+                  this.totalAmount.value -
+                  result.orderStatus.remainingAmount.value,
+                currency: result.orderStatus.remainingAmount.currency,
+              };
+              this.remainingAmount = result.orderStatus.remainingAmount;
+            }
+
+            if (this.remainingAmount.value > 0) {
+              this.status = "initial";
+              this.paymentChoice = null;
+              this.partialAmountValue = 0;
+            } else {
+              this.status = "success";
+            }
           },
 
           async createOrder() {
-            try {
-              console.log("createOrder: Attempting to fetch /api/orders...");
-              const response = await fetch("/api/orders", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ amount }),
-              });
-
-              console.log("createOrder: Received response from /api/orders.");
-              if (!response.ok) {
-                const err = await response.json();
-                console.error("createOrder: Server responded with error:", err);
-                throw new Error(err.message || "Failed to create order.");
-              }
-
-              Object.assign(this.order, await response.json());
-              console.log("createOrder: Order created:", this.order);
-            } catch (error) {
-              this.errorMessage = `Payment Error: ${err.message}`;
-              this.status = "error";
-              throw error;
+            const response = await fetch("/api/orders", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ amount: this.totalAmount }),
+            });
+            if (!response.ok) {
+              const err = await response.json();
+              throw new Error(err.message || "Failed to create order.");
             }
+            this.order = await response.json();
           },
 
           async makePayment(component) {
-            if (!component) {
-              this.errorMessage = "Adyen component not ready.";
-              return;
-            }
-
             this.status = "loading";
-            this.errorMessage = "";
-            this.paymentResponse = {};
-
-            try {
-              const response = await fetch("/api/payments", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  orderId: this.order.orderId,
-                  amount: this.amount,
-                  paymentMethod: component.data.paymentMethod,
-                  browserInfo: {
-                    userAgent: navigator.userAgent,
-                    acceptHeader: "application/json, text/plain, */*",
-                    language: navigator.language,
-                    screenWidth: window.screen.width,
-                    screenHeight: window.screen.height,
-                    timeZoneOffset: new Date().getTimezoneOffset(),
-                    colorDepth: window.screen.colorDepth,
-                    javaEnabled: navigator.javaEnabled(),
-                  },
-                  returnUrl: window.location.href, // For 3DS redirects
-                }),
-              });
-
-              this.paymentResponse = await response.json();
-
-              if (!response.ok) {
-                throw new Error(
-                  this.paymentResponse.message || "Payment failed."
-                );
-              }
-
-              if (this.paymentResponse.action) {
-                console.log(
-                  "makePayment: Handling Adyen action:",
-                  this.paymentResponse.action
-                );
-                this.status = "pendingAction"; // Indicate that an action is pending
-              } else if (this.paymentResponse.resultCode === "Authorised") {
-                this.status = "success";
-              } else {
-                this.status = "error";
-              }
-              return this.paymentResponse;
-            } catch (err) {
-              this.errorMessage = `Payment Error: ${err.message}`;
-              this.status = "error";
+            const response = await fetch("/api/payments", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                orderId: this.order.orderId,
+                amount: this.paymentAmount,
+                paymentMethod: component.data.paymentMethod,
+                browserInfo: {
+                  userAgent: navigator.userAgent,
+                  acceptHeader: "application/json, text/plain, */*",
+                  language: navigator.language,
+                  screenWidth: window.screen.width,
+                  screenHeight: window.screen.height,
+                  timeZoneOffset: new Date().getTimezoneOffset(),
+                  colorDepth: window.screen.colorDepth,
+                  javaEnabled: navigator.javaEnabled(),
+                },
+                returnUrl: window.location.origin + window.location.pathname,
+              }),
+            });
+            const paymentResponse = await response.json();
+            if (!response.ok) {
+              throw new Error(paymentResponse.message || "Payment failed.");
             }
+            return paymentResponse;
           },
+
           async addPaymentDetails(data) {
-            try {
-              const response = await fetch(`/api/payments/details/${this.paymentResponse.paymentId}`, {
+            const response = await fetch(
+              `/api/payments/details/${this.paymentResponse.paymentId}`,
+              {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(data),
-              });
-
-              this.paymentResponse = await response.json();
-
-              if (!response.ok) {
-                throw new Error(
-                  this.paymentResponse.message || "Payment confirmation failed."
-                );
               }
-
-              return this.paymentResponse;
-            } catch (err) {
-              this.errorMessage = `Payment Error: ${err.message}`;
-              this.status = "error";
+            );
+            const paymentResponse = await response.json();
+            if (!response.ok) {
+              throw new Error(
+                paymentResponse.message || "Payment confirmation failed."
+              );
             }
+            return paymentResponse;
           },
         };
       }

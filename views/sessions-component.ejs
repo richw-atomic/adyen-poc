@@ -36,7 +36,7 @@
           session: {},
           amount,
           paymentResponse: {},
-          adyenDropinComponent: null,
+          adyenDropinComponent: {},
           status: "initial", // initial, loading, ready, error, success
           errorMessage: "",
 
@@ -165,12 +165,12 @@
               const paymentMethodClass = AdyenWeb[paymentMethod.name.replace(' ', '')];
               if (paymentMethodClass) {
                 console.log(paymentMethod.type);
-                this.adyenDropinComponent = new paymentMethodClass(checkout).mount(
+                this.adyenDropinComponent[paymentMethod.type] = new paymentMethodClass(checkout).mount(
                   `#component-${paymentMethod.type}-container`
                 );
               } else if (paymentMethod.name === 'Cards') {
                 console.log(paymentMethod.type);
-                this.adyenDropinComponent = new AdyenWeb.Card(checkout).mount(
+                this.adyenDropinComponent[paymentMethod.type] = new AdyenWeb.Card(checkout).mount(
                   `#component-${paymentMethod.type}-container`
                 );
               }
