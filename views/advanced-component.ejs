@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Advanced Components</title>
+    <%- include ('header.ejs'); -%>
+  </head>
+  <body>
+    <div class="container" x-data="adyenCheckout()">
+      <h1>Advanced Components</h1>
+
+      <!-- Loading State -->
+      <div x-show="status === 'loading'">
+        <p style="text-align: center">Loading Checkout...</p>
+      </div>
+
+      <p>Current Status: <span x-text="status"></span></p>
+
+      <div x-show="remainingAmount.value > 0 && paidAmount.value > 0">
+        <h3>Payment Details</h3>
+        <p>
+          Total Paid: <span x-text="paidAmount.value / 100"></span>
+          <span x-text="paidAmount.currency"></span>
+        </p>
+        <p>
+          Remaining: <span x-text="remainingAmount.value / 100"></span>
+          <span x-text="remainingAmount.currency"></span>
+        </p>
+      </div>
+
+      <!-- Payment Options -->
+      <div x-show="status === 'initial' && remainingAmount.value > 0">
+        <div x-show="!paymentChoice">
+          <p>How would you like to pay?</p>
+          <button @click="setPaymentChoice('full')">
+            Pay Full Amount (<span x-text="remainingAmount.value / 100"></span>
+            <span x-text="remainingAmount.currency"></span>)
+          </button>
+          <button @click="setPaymentChoice('partial')">
+            Pay Partial Amount
+          </button>
+        </div>
+
+        <div x-show="paymentChoice === 'partial'">
+          <label for="partialAmount">Amount to pay:</label>
+          <input
+            type="number"
+            id="partialAmount"
+            x-model.number="partialAmountValue"
+          />
+          <button @click="initPartialPayment">Pay Partial Amount</button>
+        </div>
+      </div>
+
+      <!-- Component container -->
+      <div x-show="status === 'ready'">
+        <div id="component-scheme-container"></div>
+        <div class="wallets-wrapper">
+          <div id="component-applepay-container"></div>
+          <div id="component-googlepay-container"></div>
+        </div>
+      </div>
+
+      <%- include ('debug.ejs'); -%>
+    </div>
+
+    <script>
+      function adyenCheckout() {
+        return {
+          clientKey: "<%- clientKey %>", // Injected by EJS
+          order: {},
+          totalAmount: { value: 9000, currency: "GBP" },
+          paymentAmount: { value: 0, currency: "GBP" },
+          remainingAmount: { value: 9000, currency: "GBP" },
+          paidAmount: { value: 0, currency: "GBP" },
+          partialAmountValue: 0,
+          paymentResponse: {},
+          paymentMethods: {},
+          adyenDropinComponent: {},
+          adyenCheckoutInstance: null,
+          status: "initial", // initial, loading, ready, error, success
+          errorMessage: "",
+          paymentChoice: null, // 'full', 'partial'
+
+          init() {
+            if (
+              !this.clientKey ||
+              this.clientKey.includes("YOUR_ADYEN_CLIENT_KEY")
+            ) {
+              this.errorMessage =
+                "Adyen Client Key not configured on the server. Please set ADYEN_CLIENT_KEY in your .env file.";
+              this.status = "error";
+              return;
+            }
+            // Handle redirect
+            const urlParams = new URLSearchParams(window.location.search);
+            if (urlParams.get("resultCode")) {
+              this.status = "success"; // Or handle based on resultCode
+              // Potentially fetch order status from server here to get remaining amount
+            }
+          },
+
+          setPaymentChoice(choice) {
+            this.paymentChoice = choice;
+            if (choice === "full") {
+              this.paymentAmount = { ...this.remainingAmount };
+              this.startPayment();
+            }
+          },
+
+          initPartialPayment() {
+            if (
+              this.partialAmountValue <= 0 ||
+              this.partialAmountValue > this.remainingAmount.value / 100
+            ) {
+              this.errorMessage = "Invalid amount";
+              return;
+            }
+            this.paymentAmount = {
+              value: this.partialAmountValue * 100,
+              currency: "GBP",
+            };
+            this.startPayment();
+          },
+
+          async startPayment() {
+            this.status = "loading";
+            this.errorMessage = "";
+            try {
+              if (!this.order.orderId) {
+                await this.createOrder();
+              }
+              await this.loadPaymentMethods();
+              await this.initializeAdyen();
+              this.status = "ready";
+            } catch (err) {
+              console.error("startPayment: Caught error:", err);
+              this.errorMessage = `Error: ${err.message}`;
+              this.status = "error";
+            }
+          },
+
+          async loadPaymentMethods() {
+            // Uses this.paymentAmount
+            const response = await fetch("/api/payment-methods", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ amount: this.paymentAmount }),
+            });
+            if (!response.ok) {
+              const err = await response.json();
+              throw new Error(err.message || "Failed to load payment methods.");
+            }
+            this.paymentMethods = await response.json();
+          },
+
+          async initializeAdyen() {
+            this.adyenCheckoutInstance = await AdyenWeb.AdyenCheckout({
+              paymentMethodsResponse: this.paymentMethods,
+              clientKey: this.clientKey,
+              locale: "en-US",
+              countryCode: "GB",
+              environment: "test",
+              amount: this.paymentAmount,
+              onSubmit: async (state, component) => {
+                const result = await this.makePayment(component);
+                this.paymentResponse = result;
+                if (result.action) {
+                  this.status = "ready";
+                  component.handleAction(result.action);
+                } else if (result.resultCode === "Authorised") {
+                  this.handlePaymentSuccess(result);
+                } else {
+                  this.status = "error";
+                  this.errorMessage = result.refusalReason || "Payment failed";
+                }
+              },
+              onAdditionalDetails: async (state, component) => {
+                const result = await this.addPaymentDetails(state.data);
+                if (result.action) {
+                  component.handleAction(result.action);
+                } else if (result.resultCode === "Authorised") {
+                  this.handlePaymentSuccess(result);
+                } else {
+                  this.status = "error";
+                  this.errorMessage =
+                    result.refusalReason || "Payment details failed";
+                }
+              },
+              onError: (error) => {
+                this.status = "error";
+                this.errorMessage = error.message;
+              },
+            });
+
+            // Clear previous components
+            document.getElementById("component-scheme-container").innerHTML =
+              "";
+            document.getElementById("component-applepay-container").innerHTML =
+              "";
+            document.getElementById("component-googlepay-container").innerHTML =
+              "";
+
+            this.adyenCheckoutInstance.paymentMethodsResponse.paymentMethods.forEach(
+              (pm) => {
+                try {
+                  if (this.adyenDropinComponent[pm.type]) {
+                    this.adyenDropinComponent[pm.type].unmount();
+                  }
+                  if (pm.name === 'Cards') {
+                    this.adyenDropinComponent[pm.type] = new AdyenWeb.Card(this.adyenCheckoutInstance)
+                      .mount("#component-scheme-container");
+                    return;
+                  } else {
+                    const paymentMethodClass = AdyenWeb[pm.name.replace(' ', '')];
+                    if (!paymentMethodClass) {
+                      throw new Error(`No AdyenWeb class found for payment method: ${pm.name}`);
+                    }
+                    this.adyenDropinComponent[pm.type] = new paymentMethodClass(this.adyenCheckoutInstance)
+                      .mount(`#component-${pm.type}-container`);
+                  }
+                } catch (e) {
+                  console.error(e);
+                  console.warn("Could not mount component for", pm.type);
+                }
+              }
+            );
+          },
+
+          handlePaymentSuccess(result) {
+            console.log({result});
+            if (result.orderStatus) {
+              this.paidAmount = {
+                value:
+                  this.totalAmount.value -
+                  result.orderStatus.remainingAmount.value,
+                currency: result.orderStatus.remainingAmount.currency,
+              };
+              this.remainingAmount = result.orderStatus.remainingAmount;
+            }
+
+            if (this.remainingAmount.value > 0) {
+              this.status = "initial";
+              this.paymentChoice = null;
+              this.partialAmountValue = 0;
+            } else {
+              this.status = "success";
+            }
+          },
+
+          async createOrder() {
+            const response = await fetch("/api/orders", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ amount: this.totalAmount }),
+            });
+            if (!response.ok) {
+              const err = await response.json();
+              throw new Error(err.message || "Failed to create order.");
+            }
+            this.order = await response.json();
+          },
+
+          async makePayment(component) {
+            this.status = "loading";
+            const response = await fetch("/api/payments", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                orderId: this.order.orderId,
+                amount: this.paymentAmount,
+                paymentMethod: component.data.paymentMethod,
+                browserInfo: {
+                  userAgent: navigator.userAgent,
+                  acceptHeader: "application/json, text/plain, */*",
+                  language: navigator.language,
+                  screenWidth: window.screen.width,
+                  screenHeight: window.screen.height,
+                  timeZoneOffset: new Date().getTimezoneOffset(),
+                  colorDepth: window.screen.colorDepth,
+                  javaEnabled: navigator.javaEnabled(),
+                },
+                returnUrl: window.location.origin + window.location.pathname,
+              }),
+            });
+            const paymentResponse = await response.json();
+            if (!response.ok) {
+              throw new Error(paymentResponse.message || "Payment failed.");
+            }
+            return paymentResponse;
+          },
+
+          async addPaymentDetails(data) {
+            const response = await fetch(
+              `/api/payments/details/${this.paymentResponse.paymentId}`,
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(data),
+              }
+            );
+            const paymentResponse = await response.json();
+            if (!response.ok) {
+              throw new Error(
+                paymentResponse.message || "Payment confirmation failed."
+              );
+            }
+            return paymentResponse;
+          },
+        };
+      }
+    </script>
+  </body>
+</html>

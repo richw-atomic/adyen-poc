@@ -1,6 +1,6 @@
 const express = require('express');
 const { checkout, ADYEN_MERCHANT_ACCOUNT } = require('../config/adyenConfig');
-const { tokensDb } = require('../utils/db');
+const { v4: uuidv4 } = require('uuid');
 
 const router = express.Router();
 
@@ -19,7 +19,7 @@ router.post('/', async (req, res) => {
                 value: amount.value,
             },
         }
-        const paymentMethods = await checkout.PaymentsApi.paymentMethods(paymentMethodsRequest, { idempotencyKey: "UUID" });
+        const paymentMethods = await checkout.PaymentsApi.paymentMethods(paymentMethodsRequest, { idempotencyKey: uuidv4() });
         res.status(200).json(paymentMethods);
     } catch (error) {
         console.error('Error fetching payment methods:', err);
