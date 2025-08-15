@@ -13,7 +13,7 @@ const router = express.Router();
  */
 router.post('/', async (req, res) => {
     try {
-        const { orderId, amount, paymentMethod, storePaymentMethod, shopperReference, browserInfo, returnUrl } = req.body;
+        const { orderId, amount, paymentMethod, storePaymentMethod, shopperReference, browserInfo, returnUrl, channel } = req.body;
 
         if (!orderId || !amount || !amount.value || !amount.currency || !paymentMethod) {
             return res.status(400).json({ error: 'Invalid request: orderId, amount (value and currency), and paymentMethod are required.' });
@@ -55,11 +55,14 @@ router.post('/', async (req, res) => {
                     nativeThreeDS: 'preferred',
                 },
             },
-            browserInfo: browserInfo,
             returnUrl,
-            channel: 'Web',
-            origin: `${req.protocol}://${req.get('host')}`
+            channel: channel || 'Web', // Default to Web if not provided
         };
+
+        if (browserInfo) {
+            paymentPayload.origin = `${req.protocol}://${req.get('host')}`;
+            paymentPayload.browserInfo = browserInfo;
+        }
 
         if (storePaymentMethod) {
             paymentPayload.shopperReference = shopperReference;
